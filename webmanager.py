@@ -6,11 +6,11 @@ import base64
 import http.client
 import json
 import logging
-from logging.handlers import RotatingFileHandler
 import os
 import re
 import secrets
 import shutil
+import string
 import subprocess
 import sys
 import tarfile
@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 from xml.sax.saxutils import escape as xml_escape
@@ -366,7 +367,6 @@ class WebManager:
             db_info = self._create_wordpress_database(domain)
             record.mysql_database = db_info["database"]
             record.mysql_user = db_info["user"]
-            record.mysql_password = db_info["password"]
             self._create_wordpress_config(document_root, db_info)
             self._apply_permissions(site_root)
             sitemap_url = self._regenerate_seo_assets(domain, site_type, document_root, onion_address)
@@ -601,12 +601,12 @@ class WebManager:
         slug = domain_to_slug(domain)
         database = sanitize_mysql_identifier(f"{self.config.mysql_database_prefix}{slug}")
         user = sanitize_mysql_identifier(f"{self.config.mysql_user_prefix}{slug}")
-        password = secrets.token_urlsafe(24)
+        password = generate_safe_secret(32)
         sql = "\n".join(
             [
                 f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;",
-                f"CREATE USER IF NOT EXISTS '{user}'@'localhost' IDENTIFIED BY '{escape_sql_string(password)}';",
-                f"ALTER USER '{user}'@'localhost' IDENTIFIED BY '{escape_sql_string(password)}';",
+                f"CREATE USER IF NOT EXISTS '{user}'@'localhost' IDENTIFIED BY '{password}';",
+                f"ALTER USER '{user}'@'localhost' IDENTIFIED BY '{password}';",
                 f"GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}'@'localhost';",
                 "FLUSH PRIVILEGES;",
             ]
@@ -663,6 +663,7 @@ class WebManager:
 
     def _check_site_http(self, domain: str, onion_address: str) -> bool:
         host_header = onion_address or domain
+        connection: Optional[http.client.HTTPConnection] = None
         try:
             connection = http.client.HTTPConnection("127.0.0.1", 80, timeout=10)
             connection.request("GET", "/", headers={"Host": host_header})
@@ -673,7 +674,8 @@ class WebManager:
             return False
         finally:
             try:
-                connection.close()  # type: ignore[name-defined]
+                if connection is not None:
+                    connection.close()
             except Exception:
                 pass
 
@@ -751,7 +753,12 @@ def sanitize_mysql_identifier(value: str) -> str:
     return sanitized[:64]
 
 
-def escape_sql_string(value: str) -> str:
+def generate_safe_secret(length: int) -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def escape_php_single_quoted_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
@@ -902,8 +909,13 @@ $siteName = '{domain}';
 
 
 def render_wordpress_config(db_info: dict[str, str], table_prefix: str) -> str:
+    escaped_db_name = escape_php_single_quoted_string(db_info["database"])
+    escaped_db_user = escape_php_single_quoted_string(db_info["user"])
+    escaped_db_password = escape_php_single_quoted_string(db_info["password"])
+    escaped_db_host = escape_php_single_quoted_string(db_info["host"])
+    escaped_table_prefix = escape_php_single_quoted_string(table_prefix)
     salts = "\n".join(
-        f"define('{name}', '{secrets.token_urlsafe(48)}');"
+        f"define('{name}', '{escape_php_single_quoted_string(secrets.token_urlsafe(48))}');"
         for name in [
             "AUTH_KEY",
             "SECURE_AUTH_KEY",
@@ -916,14 +928,14 @@ def render_wordpress_config(db_info: dict[str, str], table_prefix: str) -> str:
         ]
     )
     return f"""<?php
- define( 'DB_NAME', '{db_info['database']}' );
- define( 'DB_USER', '{db_info['user']}' );
- define( 'DB_PASSWORD', '{db_info['password']}' );
- define( 'DB_HOST', '{db_info['host']}' );
+ define( 'DB_NAME', '{escaped_db_name}' );
+ define( 'DB_USER', '{escaped_db_user}' );
+ define( 'DB_PASSWORD', '{escaped_db_password}' );
+ define( 'DB_HOST', '{escaped_db_host}' );
  define( 'DB_CHARSET', 'utf8mb4' );
  define( 'DB_COLLATE', '' );
  {salts}
- $table_prefix = '{table_prefix}';
+ $table_prefix = '{escaped_table_prefix}';
  define( 'WP_DEBUG', false );
  if ( ! defined( 'ABSPATH' ) ) {{
      define( 'ABSPATH', __DIR__ . '/' );
