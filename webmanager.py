@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional
 from xml.sax.saxutils import escape as xml_escape
 
 try:
@@ -38,10 +38,6 @@ except ImportError:
         DEFAULT_TYPE = Any
 
     ContextTypes = _ContextTypes()  # type: ignore[assignment]
-
-if TYPE_CHECKING:
-    from telegram.ext import ContextTypes as TelegramContextTypes
-
 
 VALID_SITE_TYPES = {"wordpress", "html", "php"}
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
@@ -186,17 +182,24 @@ class CommandRunner:
         env = os.environ.copy()
         if extra_env:
             env.update(extra_env)
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout_seconds,
-            env=env,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise CommandExecutionError(
+                f"Command timed out after {self.timeout_seconds}s ({' '.join(command)})"
+            ) from exc
         if check and completed.returncode != 0:
             stderr = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
-            raise CommandExecutionError(f"Command failed ({' '.join(command)}): {stderr}")
+            raise CommandExecutionError(
+                f"Command failed with exit code {completed.returncode} ({' '.join(command)}): {stderr}"
+            )
         return completed
 
 
@@ -367,7 +370,7 @@ class WebManager:
             db_info = self._create_wordpress_database(domain)
             record.mysql_database = db_info["database"]
             record.mysql_user = db_info["user"]
-            self._create_wordpress_config(document_root, db_info)
+            self._create_wordpress_config(domain, document_root, db_info)
             self._apply_permissions(site_root)
             sitemap_url = self._regenerate_seo_assets(domain, site_type, document_root, onion_address)
             record.sitemap_url = sitemap_url
@@ -605,8 +608,8 @@ class WebManager:
         sql = "\n".join(
             [
                 f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;",
-                f"CREATE USER IF NOT EXISTS '{user}'@'localhost' IDENTIFIED BY '{password}';",
-                f"ALTER USER '{user}'@'localhost' IDENTIFIED BY '{password}';",
+                f"CREATE USER IF NOT EXISTS '{user}'@'localhost' IDENTIFIED BY '{escape_mysql_single_quoted_string(password)}';",
+                f"ALTER USER '{user}'@'localhost' IDENTIFIED BY '{escape_mysql_single_quoted_string(password)}';",
                 f"GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}'@'localhost';",
                 "FLUSH PRIVILEGES;",
             ]
@@ -624,9 +627,9 @@ class WebManager:
         )
         return {"database": database, "user": user, "password": password, "host": "localhost"}
 
-    def _create_wordpress_config(self, document_root: Path, db_info: dict[str, str]) -> None:
+    def _create_wordpress_config(self, domain: str, document_root: Path, db_info: dict[str, str]) -> None:
         config_path = document_root / "wp-config.php"
-        table_prefix = f"{domain_to_slug(document_root.parent.name)}_"
+        table_prefix = f"{domain_to_slug(domain)}_"
         self._write_text(config_path, render_wordpress_config(db_info, table_prefix))
 
     def _apply_permissions(self, site_root: Path) -> None:
@@ -754,8 +757,12 @@ def sanitize_mysql_identifier(value: str) -> str:
 
 
 def generate_safe_secret(length: int) -> str:
-    alphabet = string.ascii_letters + string.digits
+    alphabet = string.ascii_letters + string.digits + "-_!@#$%^&*()+="
     return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def escape_mysql_single_quoted_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def escape_php_single_quoted_string(value: str) -> str:
