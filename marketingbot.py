@@ -210,7 +210,7 @@ def authorized_only(
         except Exception as exc:  # noqa: BLE001
             logger.exception("Command failed: %s", func.__name__)
             if update.effective_chat:
-                await update.effective_chat.send_message(f"❌ Error: {exc}")
+                await update.effective_chat.send_message("❌ Error: command failed. Check bot logs.")
             return ConversationHandler.END
 
     return wrapper
@@ -442,8 +442,9 @@ async def publish_post(
         return {"success": True, "detail": detail, "content": content}
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to publish post to %s", platform_key)
-        await append_post_log(platform_key, product, False, content, str(exc))
-        return {"success": False, "detail": str(exc), "content": content}
+        safe_detail = f"{type(exc).__name__}: publish failed"
+        await append_post_log(platform_key, product, False, content, safe_detail)
+        return {"success": False, "detail": safe_detail, "content": content}
 
 
 async def scheduled_job_runner(
@@ -466,6 +467,8 @@ async def scheduled_job_runner(
 
 def register_schedule_job(application: Application, job_id: str, payload: Dict[str, str]) -> None:
     run_date = datetime.fromisoformat(payload["scheduled_time"])
+    if run_date.tzinfo is None:
+        run_date = run_date.replace(tzinfo=timezone.utc)
     scheduler.add_job(
         scheduled_job_runner,
         "date",
@@ -722,7 +725,7 @@ async def schedule_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.effective_chat.send_message("Invalid datetime format. Use YYYY-MM-DDTHH:MM")
         return
 
-    if run_at <= datetime.now():
+    if run_at <= datetime.now(run_at.tzinfo or timezone.utc):
         await update.effective_chat.send_message("Scheduled time must be in the future.")
         return
 
@@ -770,8 +773,12 @@ async def cancel_scheduled(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         scheduler.remove_job(job_id)
         removed = True
-    except Exception:
-        logger.info("Scheduled job %s not present in in-memory scheduler", job_id)
+    except Exception as exc:
+        logger.warning(
+            "Failed to remove scheduled job %s from in-memory scheduler: %s",
+            job_id,
+            exc,
+        )
 
     async with storage_lock:
         scheduled = load_scheduled()
@@ -1068,12 +1075,14 @@ async def post_init(application: Application) -> None:
     if not scheduler.running:
         scheduler.start()
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     scheduled = load_scheduled()
     dropped = 0
     for job_id, payload in list(scheduled.items()):
         try:
             run_date = datetime.fromisoformat(payload["scheduled_time"])
+            if run_date.tzinfo is None:
+                run_date = run_date.replace(tzinfo=timezone.utc)
             if run_date <= now:
                 del scheduled[job_id]
                 dropped += 1
@@ -1147,7 +1156,7 @@ def main() -> None:
         config = read_config()
     except Exception as exc:  # noqa: BLE001
         logger.error("Startup failed: %s", exc)
-        raise SystemExit(1) from exc
+        raise SystemExit(1)
 
     app = build_application(config)
     app.run_polling(allowed_updates=Update.ALL_TYPES)

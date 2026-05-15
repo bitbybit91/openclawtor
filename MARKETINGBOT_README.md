@@ -26,7 +26,7 @@
 Install dependencies:
 
 ```bash
-pip install python-telegram-bot>=20 apscheduler cryptography tweepy praw requests
+pip install "python-telegram-bot>=20,<22" "apscheduler>=3.10,<4" "cryptography>=42,<44" "tweepy>=4.14,<5" "praw>=7.7,<8" "requests>=2.31,<3"
 ```
 
 ## Environment Variables
