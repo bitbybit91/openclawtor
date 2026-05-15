@@ -351,7 +351,7 @@ class WebManager:
         )
         self._reload_apache()
         self._apply_permissions(site_root)
-        sitemap_url = self._regenerate_seo_assets(domain, site_type, document_root, onion_address)
+        sitemap_url = ""
         record = SiteRecord(
             domain=domain,
             site_type=site_type,
@@ -372,8 +372,8 @@ class WebManager:
             record.mysql_user = db_info["user"]
             self._create_wordpress_config(domain, document_root, db_info)
             self._apply_permissions(site_root)
-            sitemap_url = self._regenerate_seo_assets(domain, site_type, document_root, onion_address)
-            record.sitemap_url = sitemap_url
+        sitemap_url = self._regenerate_seo_assets(domain, site_type, document_root, onion_address)
+        record.sitemap_url = sitemap_url
         registry[domain] = asdict(record)
         self._save_registry(registry)
         return (
