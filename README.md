@@ -552,8 +552,10 @@ OPENAI_API_KEY=sk-...
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | **Yes** | Token from [@BotFather](https://t.me/BotFather). Format: `123456789:ABCDEF...` |
-| `TELEGRAM_CHAT_ID` | **Yes** | Integer chat ID of the single authorized operator. Only this chat can issue commands. |
+| `TELEGRAM_BOT_TOKEN` | **Yes** | Token from [@BotFather](https://t.me/BotFather). Format: `123456789:ABCDEF...`. Keep this value private — anyone with the token can interact with the bot. |
+| `TELEGRAM_CHAT_ID` | **Yes** | Integer chat ID of the single authorized operator. Only this chat ID can issue commands. This value acts as the bot's authorization boundary — keep it private and do not share it. Any chat whose ID does not match this value receives `Not authorized.` |
+
+> **Security note:** `TELEGRAM_CHAT_ID` is the sole access control boundary for the marketing bot. Do not commit it to version control or log it. If you need to change the authorized operator, update this value and restart the bot.
 
 #### Example `.env` file for the marketing bot
 
@@ -871,14 +873,16 @@ docker build -t openclaw:local .
 
 ```bash
 nohup python marketingbot.py &> /var/log/marketingbot.log &
-echo $! > /var/run/marketingbot.pid
+echo $! > /tmp/marketingbot.pid
 ```
 
 To stop:
 
 ```bash
-kill "$(cat /var/run/marketingbot.pid)"
+kill "$(cat /tmp/marketingbot.pid)"
 ```
+
+> **Note:** `/var/run/` typically requires root permissions. `/tmp/marketingbot.pid` is writable by any user. For a persistent PID file location owned by your user, use `~/.local/run/marketingbot.pid` (create the directory first with `mkdir -p ~/.local/run`).
 
 **Run as a systemd service:**
 
@@ -1083,7 +1087,7 @@ ruff check .
 | `telegram.error.InvalidToken` | `TELEGRAM_BOT_TOKEN` is malformed or revoked | Token must be format `123456789:ABCDEF...` from BotFather — regenerate if necessary |
 | `ModuleNotFoundError: No module named 'telegram'` | Virtual environment is not active | `source .venv/bin/activate` then rerun |
 | `tweepy.errors.Unauthorized: 401` | Twitter/X API keys are invalid or expired | Regenerate keys at [developer.twitter.com](https://developer.twitter.com) and update with `/addcredentials twitter api_key <value>` |
-| `praw.exceptions.OAuthException` | Reddit client credentials are wrong or account has 2FA enabled | Use app credentials from [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps); password auth requires 2FA to be disabled on the Reddit account |
+| `praw.exceptions.OAuthException` | Reddit client credentials are wrong or account has 2FA enabled | Use app credentials from [reddit.com/prefs/apps](https://www.reddit.com/prefs/apps). For accounts with 2FA enabled, use an OAuth2 refresh token flow instead of password auth — create a Reddit app of type "script", obtain a refresh token via the OAuth2 authorization flow, and supply it as `refresh_token` in your credentials. Password auth (`username`/`password`) requires 2FA to be disabled on the Reddit account. |
 | `ERROR: matrix-sdk-crypto native addon missing` | pnpm install silently failed for this CPU architecture | Run `pnpm install --frozen-lockfile` on a supported architecture (amd64 or arm64) |
 | `docker: Error response from daemon: driver failed programming external connectivity` | Port 18789 or 18790 is already bound by another process | `lsof -i :18789` or `ss -ltnp \| grep 18789` to identify the process, then `kill <PID>` |
 | `Killed` during `pnpm install` inside Docker build | Out of memory on the build host | Add `--memory=4g` to `docker build`, or set `NODE_OPTIONS=--max-old-space-size=2048` in the build environment |
