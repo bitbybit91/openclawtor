@@ -925,6 +925,14 @@ channels:
     proxy: socks5://<user>:<password>@proxy-host:1080
 ```
 
+    - To route Telegram Bot API calls through a local SOCKS5 proxy (for example Tor on port 9050), use a proxy URL without credentials:
+
+```yaml
+channels:
+  telegram:
+    proxy: socks5://127.0.0.1:9050
+```
+
     - Node 22+ defaults to `autoSelectFamily=true` (except WSL2) and `dnsResultOrder=ipv4first`.
     - If your host is WSL2 or explicitly works better with IPv4-only behavior, force family selection:
 

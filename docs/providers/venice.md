@@ -250,6 +250,24 @@ openclaw agent --model venice/qwen3-coder-480b-a35b-instruct --message "Refactor
   <Accordion title="Connection issues">
     Venice API is at `https://api.venice.ai/api/v1`. Ensure your network allows HTTPS connections.
   </Accordion>
+
+  <Accordion title="Routing API traffic through a SOCKS5 proxy (e.g. Tor)">
+    Set the standard proxy environment variables before starting the gateway:
+
+    ```bash
+    export HTTPS_PROXY=socks5h://127.0.0.1:9050
+    export HTTP_PROXY=socks5h://127.0.0.1:9050
+    ```
+
+    `socks5h` tells the HTTP client to resolve hostnames through the proxy (important for Tor — use `socks5h`, not `socks5`).
+
+    To make this permanent, add the variables to your `~/.openclaw/.env` or your systemd service environment file.
+
+    <Note>
+    The Venice provider uses standard Node.js `fetch` which honors `HTTPS_PROXY`/`HTTP_PROXY` environment variables. No code change is needed — set the env vars and restart the gateway.
+    </Note>
+
+  </Accordion>
 </AccordionGroup>
 
 <Note>
